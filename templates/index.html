@@ -310,32 +310,42 @@
             margin: 0;
         }
 
-        .grafik img {
+        .grafik canvas {
             display: block;
-            max-width: 100%;
-            height: auto;
-            margin: 0 auto;
+            width: 100%;
         }
 
-        .indirmeler {
+        .grafik-alt {
             display: flex;
             flex-wrap: wrap;
+            align-items: center;
             gap: 8px;
             margin-top: 12px;
         }
 
-        .indirmeler a {
-            font-size: 0.85rem;
+        button.kucuk {
             padding: 5px 12px;
             border: 1px solid var(--cizgi);
             border-radius: 6px;
+            background: var(--zemin);
             color: var(--metin);
-            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
         }
 
-        .indirmeler a:hover {
+        button.kucuk:hover {
             border-color: var(--vurgu);
+            background: var(--zemin);
             color: var(--vurgu);
+        }
+
+        .durum {
+            font-size: 0.82rem;
+            color: var(--soluk);
+        }
+
+        .durum.hata {
+            color: var(--hata);
         }
 
         /* ---------- Tablo ---------- */
@@ -538,13 +548,16 @@
                 {% endif %}
             {% endif %}
 
-            {% if gif %}
+            {% if grafik_verisi %}
                 <figure class="kart grafik">
-                    <img src="data:image/gif;base64,{{ gif }}" alt="Çözümün adım adım çizilen animasyonu">
-                    <div class="indirmeler">
-                        <a href="data:image/gif;base64,{{ gif }}" download="cozum.gif">GIF indir</a>
-                        <a href="data:image/png;base64,{{ grafik }}" download="cozum.png">PNG indir</a>
+                    <canvas id="grafik-tuvali" role="img" aria-label="Çözümün adım adım çizilen grafiği"></canvas>
+                    <div class="grafik-alt">
+                        <button type="button" class="kucuk" id="tekrar-oynat">▶ Tekrar oynat</button>
+                        <button type="button" class="kucuk" id="png-indir">PNG indir</button>
+                        <button type="button" class="kucuk" id="gif-indir">GIF indir</button>
+                        <span class="durum" id="gif-durumu" role="status"></span>
                     </div>
+                    <script id="grafik-verisi" type="application/json">{{ grafik_verisi|tojson }}</script>
                 </figure>
             {% endif %}
         </div>
@@ -678,6 +691,271 @@
 
         dereceyiUygula();
         adimBoyunuGoster();
+    })();
+</script>
+
+<script>
+    // Çözüm grafiği: sunucu sadece sayıları gönderir, animasyonu tarayıcı çizer
+    (function () {
+        const veriKutusu = document.getElementById("grafik-verisi");
+        if (!veriKutusu) {
+            return;
+        }
+        const veri = JSON.parse(veriKutusu.textContent);
+        const tuval = document.getElementById("grafik-tuvali");
+        const ctx = tuval.getContext("2d");
+        const gifButonu = document.getElementById("gif-indir");
+        const gifDurumu = document.getElementById("gif-durumu");
+
+        const RENKLER = ["#1f77b4", "#ff7f0e", "#2ca02c"];   // matplotlib'in renkleri
+        const YAZI = "'Segoe UI', system-ui, Arial, sans-serif";
+        const SURE = 2500;                                   // animasyon süresi (ms)
+        const N = veri.x.length;
+
+        let oran = 0;
+        let baslangicZamani = null;
+        let animasyonId = null;
+
+        // Eksen sınırları bütün veriden bir kez hesaplanır, animasyonda kaymaz
+        let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+        for (const x of veri.x) {
+            xMin = Math.min(xMin, x);
+            xMax = Math.max(xMax, x);
+        }
+        for (const seri of veri.seriler) {
+            for (const y of seri.degerler) {
+                yMin = Math.min(yMin, y);
+                yMax = Math.max(yMax, y);
+            }
+        }
+        let pay = (yMax - yMin) * 0.05;
+        if (pay === 0) {
+            pay = Math.abs(yMax) * 0.1 || 1;
+        }
+        yMin -= pay;
+        yMax += pay;
+        const xAralik = (xMax - xMin) || 1;
+
+        // Eksen için "yuvarlak" çentik değerleri: 0, 0.5, 1, 1.5 ... gibi
+        function guzelCentikler(min, max, hedefSayi) {
+            const ham = (max - min) / hedefSayi;
+            const us = Math.pow(10, Math.floor(Math.log10(ham)));
+            const kesir = ham / us;
+            const adim = (kesir < 1.5 ? 1 : kesir < 3 ? 2 : kesir < 7 ? 5 : 10) * us;
+            const liste = [];
+            for (let v = Math.ceil(min / adim) * adim; v <= max + adim * 1e-9; v += adim) {
+                liste.push(Math.abs(v) < adim * 1e-9 ? 0 : v);
+            }
+            return liste;
+        }
+
+        function sayiYaz(v) {
+            const mutlak = Math.abs(v);
+            if (mutlak !== 0 && (mutlak < 1e-3 || mutlak >= 1e5)) {
+                return v.toExponential(1);
+            }
+            return String(Number(v.toPrecision(4)));
+        }
+
+        function ciz() {
+            const olcek = window.devicePixelRatio || 1;
+            const genislik = tuval.clientWidth;
+            const yukseklik = Math.max(260, Math.round(genislik * 0.56));
+            tuval.style.height = yukseklik + "px";
+            tuval.width = Math.round(genislik * olcek);
+            tuval.height = Math.round(yukseklik * olcek);
+            ctx.setTransform(olcek, 0, 0, olcek, 0, 0);
+
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(0, 0, genislik, yukseklik);
+
+            const sol = 64, sag = 16, ust = 36, alt = 40;
+            const w = genislik - sol - sag;
+            const h = yukseklik - ust - alt;
+            const px = x => sol + (x - xMin) / xAralik * w;
+            const py = y => ust + (yMax - y) / (yMax - yMin) * h;
+
+            // Izgara çizgileri ve eksen sayıları
+            ctx.font = "12px " + YAZI;
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = "#e5e7eb";
+            ctx.fillStyle = "#656d76";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "top";
+            for (const v of guzelCentikler(xMin, xMax, Math.max(3, Math.floor(w / 90)))) {
+                const X = Math.round(px(v)) + 0.5;
+                ctx.beginPath();
+                ctx.moveTo(X, ust);
+                ctx.lineTo(X, ust + h);
+                ctx.stroke();
+                ctx.fillText(sayiYaz(v), X, ust + h + 6);
+            }
+            ctx.textAlign = "right";
+            ctx.textBaseline = "middle";
+            for (const v of guzelCentikler(yMin, yMax, Math.max(3, Math.floor(h / 50)))) {
+                const Y = Math.round(py(v)) + 0.5;
+                ctx.beginPath();
+                ctx.moveTo(sol, Y);
+                ctx.lineTo(sol + w, Y);
+                ctx.stroke();
+                ctx.fillText(sayiYaz(v), sol - 8, Y);
+            }
+            ctx.strokeStyle = "#9ca3af";
+            ctx.strokeRect(sol + 0.5, ust + 0.5, w, h);
+
+            // Başlık ve x etiketi
+            ctx.fillStyle = "#1f2328";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "alphabetic";
+            ctx.fillText("x", sol + w / 2, yukseklik - 6);
+            ctx.font = "13px " + YAZI;
+            ctx.fillText(veri.baslik, sol + w / 2, 22);
+
+            // Eğriler: sadece "son" noktaya kadar çizilir, animasyon böyle ilerler
+            const son = Math.round(oran * (N - 1));
+            const noktaGoster = N <= 80;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(sol, ust, w, h);
+            ctx.clip();
+            veri.seriler.forEach(function (seri, i) {
+                const renk = RENKLER[i % RENKLER.length];
+                ctx.strokeStyle = renk;
+                ctx.fillStyle = renk;
+                ctx.lineWidth = 1.8;
+                ctx.lineJoin = "round";
+                ctx.beginPath();
+                for (let k = 0; k <= son; k++) {
+                    const X = px(veri.x[k]);
+                    const Y = py(seri.degerler[k]);
+                    if (k === 0) {
+                        ctx.moveTo(X, Y);
+                    } else {
+                        ctx.lineTo(X, Y);
+                    }
+                }
+                ctx.stroke();
+                if (noktaGoster) {
+                    for (let k = 0; k <= son; k++) {
+                        ctx.beginPath();
+                        ctx.arc(px(veri.x[k]), py(seri.degerler[k]), 2.5, 0, 2 * Math.PI);
+                        ctx.fill();
+                    }
+                }
+                if (oran < 1) {
+                    ctx.beginPath();
+                    ctx.arc(px(veri.x[son]), py(seri.degerler[son]), 4.5, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+            });
+            ctx.restore();
+
+            // Lejant (sağ üst köşe)
+            ctx.font = "12px " + YAZI;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            let enGenisAd = 0;
+            for (const seri of veri.seriler) {
+                enGenisAd = Math.max(enGenisAd, ctx.measureText(seri.ad).width);
+            }
+            const satirYuksekligi = 18;
+            const kutuGenisligi = enGenisAd + 42;
+            const kutuYuksekligi = veri.seriler.length * satirYuksekligi + 8;
+            const kx = sol + w - kutuGenisligi - 8;
+            const ky = ust + 8;
+            ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+            ctx.fillRect(kx, ky, kutuGenisligi, kutuYuksekligi);
+            ctx.strokeStyle = "#d1d5db";
+            ctx.strokeRect(kx + 0.5, ky + 0.5, kutuGenisligi, kutuYuksekligi);
+            veri.seriler.forEach(function (seri, i) {
+                const yy = ky + 4 + satirYuksekligi * i + satirYuksekligi / 2;
+                ctx.strokeStyle = RENKLER[i % RENKLER.length];
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(kx + 8, yy);
+                ctx.lineTo(kx + 28, yy);
+                ctx.stroke();
+                ctx.fillStyle = "#1f2328";
+                ctx.fillText(seri.ad, kx + 34, yy);
+            });
+        }
+
+        function kare(zaman) {
+            if (baslangicZamani === null) {
+                baslangicZamani = zaman;
+            }
+            oran = Math.min(1, (zaman - baslangicZamani) / SURE);
+            ciz();
+            animasyonId = oran < 1 ? requestAnimationFrame(kare) : null;
+        }
+
+        function oynat() {
+            if (animasyonId) {
+                cancelAnimationFrame(animasyonId);
+            }
+            baslangicZamani = null;
+            oran = 0;
+            animasyonId = requestAnimationFrame(kare);
+        }
+
+        function tamamla() {
+            if (animasyonId) {
+                cancelAnimationFrame(animasyonId);
+                animasyonId = null;
+            }
+            oran = 1;
+            ciz();
+        }
+
+        function dosyaIndir(adres, dosyaAdi) {
+            const baglanti = document.createElement("a");
+            baglanti.href = adres;
+            baglanti.download = dosyaAdi;
+            document.body.appendChild(baglanti);
+            baglanti.click();
+            baglanti.remove();
+        }
+
+        document.getElementById("tekrar-oynat").addEventListener("click", oynat);
+
+        document.getElementById("png-indir").addEventListener("click", function () {
+            tamamla();
+            dosyaIndir(tuval.toDataURL("image/png"), "cozum.png");
+        });
+
+        // GIF'i sunucu üretir; Render'da yavaş olduğu için sadece istenince
+        gifButonu.addEventListener("click", async function () {
+            gifButonu.disabled = true;
+            gifDurumu.classList.remove("hata");
+            gifDurumu.textContent = "GIF hazırlanıyor… (30 saniye kadar sürebilir)";
+            try {
+                const cevap = await fetch("/gif", {
+                    method: "POST",
+                    body: new URLSearchParams(veri.parametreler),
+                });
+                if (!cevap.ok) {
+                    const neden = cevap.status === 400 ? await cevap.text() : "sunucu hatası (" + cevap.status + ")";
+                    throw new Error(neden);
+                }
+                const adres = URL.createObjectURL(await cevap.blob());
+                dosyaIndir(adres, "cozum.gif");
+                setTimeout(function () { URL.revokeObjectURL(adres); }, 10000);
+                gifDurumu.textContent = "GIF indirildi.";
+            } catch (hata) {
+                gifDurumu.textContent = "GIF oluşturulamadı: " + hata.message;
+                gifDurumu.classList.add("hata");
+            } finally {
+                gifButonu.disabled = false;
+            }
+        });
+
+        window.addEventListener("resize", ciz);
+
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+            tamamla();
+        } else {
+            oynat();
+        }
     })();
 </script>
 </body>
