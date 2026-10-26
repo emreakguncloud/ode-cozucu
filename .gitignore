@@ -1,0 +1,19 @@
+# Python'un kendi oluşturduğu önbellek dosyaları
+__pycache__/
+*.pyc
+
+# Sanal ortamlar
+.venv/
+venv/
+
+# İndirilen çıktılar
+*.csv
+*.gif
+*.png
+
+# Editör ve sistem dosyaları
+.vscode/
+.idea/
+.claude/
+Thumbs.db
+.DS_Store

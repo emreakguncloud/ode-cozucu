@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ODE Çözücü</title>
+
+    <style>
+        /* ---------- Renkler ve ortak değerler ---------- */
+        :root {
+            --metin: #1f2328;
+            --soluk: #656d76;
+            --cizgi: #e5e7eb;
+            --kutu-cizgi: #cfd4dc;
+            --zemin: #ffffff;
+            --yuzey: #f7f8fa;
+            --vurgu: #2563eb;
+            --vurgu-koyu: #1d4ed8;
+            --vurgu-acik: #e8efff;
+            --hata: #b42318;
+            --hata-zemin: #fef3f2;
+            --hata-cizgi: #fecdca;
+            --yaricap: 10px;
+            --mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        [hidden] {
+            display: none !important;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", system-ui, Arial, sans-serif;
+            color: var(--metin);
+            background: var(--zemin);
+            line-height: 1.5;
+        }
+
+        .sayfa {
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 28px 20px 48px;
+        }
+
+        /* ---------- Başlık ---------- */
+        header {
+            border-bottom: 1px solid var(--cizgi);
+            padding-bottom: 14px;
+            margin-bottom: 24px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.7rem;
+            font-weight: 650;
+            letter-spacing: -0.01em;
+        }
+
+        header p {
+            margin: 2px 0 0;
+            color: var(--soluk);
+        }
+
+        /* ---------- İki sütunlu düzen ---------- */
+        .duzen {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 28px;
+            align-items: start;
+        }
+
+        .sol {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            min-width: 0;
+        }
+
+        .sag {
+            position: sticky;
+            top: 16px;
+        }
+
+        .kart {
+            border: 1px solid var(--cizgi);
+            border-radius: var(--yaricap);
+            padding: 18px 20px;
+            background: var(--zemin);
+        }
+
+        h2 {
+            margin: 0 0 10px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--soluk);
+        }
+
+        /* ---------- Form ---------- */
+        .grup + .grup {
+            border-top: 1px solid var(--cizgi);
+            margin-top: 18px;
+            padding-top: 16px;
+        }
+
+        .ust-satir {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px 20px;
+            align-items: flex-end;
+            margin-bottom: 14px;
+        }
+
+        .alanlar {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 12px 14px;
+        }
+
+        .alan {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .alan label,
+        .alan .etiket {
+            font-size: 0.85rem;
+            color: var(--soluk);
+        }
+
+        .ornek-alani {
+            flex: 1 1 240px;
+        }
+
+        input,
+        select,
+        button {
+            font: inherit;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid var(--kutu-cizgi);
+            border-radius: 8px;
+            background: var(--zemin);
+            color: var(--metin);
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--vurgu);
+            box-shadow: 0 0 0 3px var(--vurgu-acik);
+        }
+
+        /* Derece seçici: yan yana üç düğme */
+        .segment {
+            display: inline-flex;
+            border: 1px solid var(--kutu-cizgi);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .segment label {
+            position: relative;
+        }
+
+        .segment input {
+            position: absolute;
+            opacity: 0;
+            width: 1px;
+            height: 1px;
+        }
+
+        .segment span {
+            display: block;
+            padding: 8px 16px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .segment label + label span {
+            border-left: 1px solid var(--kutu-cizgi);
+        }
+
+        .segment input:checked + span {
+            background: var(--vurgu);
+            color: #fff;
+        }
+
+        .segment input:focus-visible + span {
+            box-shadow: inset 0 0 0 2px var(--vurgu-koyu);
+        }
+
+        /* Denklem satırı */
+        .denklem {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .denklem .sol-taraf {
+            font-family: var(--mono);
+            font-size: 1.05rem;
+            white-space: nowrap;
+            min-width: 5ch;
+            text-align: right;
+        }
+
+        .denklem input {
+            font-family: var(--mono);
+            font-size: 1.05rem;
+        }
+
+        .ipucu {
+            margin: 8px 0 0;
+            font-size: 0.82rem;
+            color: var(--soluk);
+        }
+
+        code {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            background: var(--yuzey);
+            border: 1px solid var(--cizgi);
+            border-radius: 4px;
+            padding: 0 4px;
+        }
+
+        /* ---------- Butonlar ---------- */
+        .butonlar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 9px 22px;
+            border: 1px solid var(--vurgu);
+            border-radius: 8px;
+            background: var(--vurgu);
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: var(--vurgu-koyu);
+        }
+
+        button.ikincil {
+            background: var(--zemin);
+            color: var(--vurgu);
+        }
+
+        button.ikincil:hover {
+            background: var(--vurgu-acik);
+        }
+
+        button:disabled {
+            opacity: 0.7;
+            cursor: progress;
+        }
+
+        /* ---------- Sonuç kartı ---------- */
+        .sonuc {
+            border-left: 4px solid var(--vurgu);
+        }
+
+        .sonuc .ozet {
+            font-size: 0.85rem;
+            color: var(--soluk);
+        }
+
+        .degerler {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 24px;
+            margin-top: 4px;
+        }
+
+        .deger {
+            font-family: var(--mono);
+            font-size: 1.1rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .deger span {
+            color: var(--soluk);
+        }
+
+        .sonuc.hata {
+            border-color: var(--hata-cizgi);
+            border-left-color: var(--hata);
+            background: var(--hata-zemin);
+            color: var(--hata);
+        }
+
+        /* ---------- Grafik kartı ---------- */
+        .grafik {
+            margin: 0;
+        }
+
+        .grafik img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            margin: 0 auto;
+        }
+
+        .indirmeler {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .indirmeler a {
+            font-size: 0.85rem;
+            padding: 5px 12px;
+            border: 1px solid var(--cizgi);
+            border-radius: 6px;
+            color: var(--metin);
+            text-decoration: none;
+        }
+
+        .indirmeler a:hover {
+            border-color: var(--vurgu);
+            color: var(--vurgu);
+        }
+
+        /* ---------- Tablo ---------- */
+        .tablo-kart {
+            padding: 14px 16px;
+        }
+
+        .bos {
+            width: 280px;
+            margin: 0;
+            font-size: 0.9rem;
+            color: var(--soluk);
+        }
+
+        table {
+            border-collapse: collapse;
+            font-size: 0.9em;
+            font-variant-numeric: tabular-nums;
+        }
+
+        th,
+        td {
+            padding: 4px 12px;
+            text-align: right;
+            white-space: nowrap;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            font-weight: 600;
+            border-bottom: 2px solid #999;
+            background: var(--zemin);
+        }
+
+        tbody tr:nth-child(even) {
+            background: var(--yuzey);
+        }
+
+        tbody tr:hover {
+            background: var(--vurgu-acik);
+        }
+
+        tbody tr:last-child td {
+            font-weight: 600;
+            border-bottom: 2px solid #999;
+        }
+
+        td:first-child {
+            color: #888;
+        }
+
+        .not {
+            margin: 10px 0 0;
+            font-size: 0.8rem;
+            color: var(--soluk);
+        }
+
+        /* ---------- Dar ekranlar (telefon) ---------- */
+        @media (max-width: 860px) {
+            .duzen {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .sag {
+                position: static;
+                min-width: 0;
+            }
+
+            .tablo-kaydir {
+                overflow-x: auto;
+            }
+
+            .bos {
+                width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="sayfa">
+    <header>
+        <h1>ODE Çözücü</h1>
+        <p>1., 2. ve 3. dereceden adi diferansiyel denklemler için sayısal çözüm</p>
+    </header>
+
+    <div class="duzen">
+        <div class="sol">
+            <form method="post" class="kart" id="cozum-formu">
+
+                <section class="grup">
+                    <h2>Denklem</h2>
+
+                    <div class="ust-satir">
+                        <div class="alan ornek-alani">
+                            <label for="ornek">Hazır örnek yükle</label>
+                            <select id="ornek">
+                                <option value="">Seç…</option>
+                                <option data-derece="1" data-ifade="3*exp(-x) - 0.4*y" data-x0="0" data-xmax="3" data-y0="5">y' = 3e⁻ˣ − 0.4y</option>
+                                <option data-derece="1" data-ifade="-2.2067e-12*(y^4 - 81e8)" data-x0="0" data-xmax="480" data-y0="1200">Işımayla soğuma</option>
+                                <option data-derece="1" data-ifade="0.38*y*(1 - y/16)" data-x0="0" data-xmax="50" data-y0="1">Lojistik büyüme</option>
+                                <option data-derece="1" data-ifade="(9*2e-5 - y)/(50*2e-5)" data-x0="0" data-xmax="0.005" data-y0="0">Kondansatörün dolması (RC)</option>
+                                <option data-derece="2" data-ifade="-9.8*sin(y)" data-x0="0" data-xmax="3" data-y0="0.2" data-yp0="0">Basit sarkaç</option>
+                                <option data-derece="2" data-ifade="(exp(-x) - 2*y' - 5*y)/3" data-x0="0" data-xmax="1" data-y0="5" data-yp0="7">Hocanın örneği: 3y'' + 2y' + 5y = e⁻ˣ</option>
+                                <option data-derece="2" data-ifade="exp(-x) - 2*y' - y" data-x0="0" data-xmax="0.75" data-y0="1" data-yp0="2" data-yontem="euler" data-n="3">Hocanın örneği: y'' + 2y' + y = e⁻ˣ (Euler, h = 0.25)</option>
+                                <option data-derece="3" data-ifade="6" data-x0="0" data-xmax="1" data-y0="0" data-yp0="0" data-ypp0="0">y''' = 6 (çözüm: y = x³)</option>
+                            </select>
+                        </div>
+
+                        <div class="alan">
+                            <span class="etiket" id="derece-etiketi">Derece</span>
+                            <div class="segment" role="radiogroup" aria-labelledby="derece-etiketi">
+                                {% for d in [1, 2, 3] %}
+                                    <label>
+                                        <input type="radio" name="derece" value="{{ d }}" {% if d == derece %}checked{% endif %}>
+                                        <span>{{ d }}.</span>
+                                    </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="denklem">
+                        <label for="ifade" class="sol-taraf" id="sol-taraf">{{ etiket }} =</label>
+                        <input type="text" id="ifade" name="ifade" value="{{ ifade }}" required
+                               autocomplete="off" spellcheck="false">
+                    </div>
+                    <p class="ipucu">
+                        Kullanılabilir: <code>x</code> <code>y</code> <code>y'</code> <code>y''</code>
+                        <code>exp</code> <code>sin</code> <code>cos</code> <code>tan</code>
+                        <code>sqrt</code> <code>log</code> <code>pi</code> <code>e</code>
+                        · üs için <code>^</code> · çarpma için <code>*</code>
+                    </p>
+                </section>
+
+                <section class="grup">
+                    <h2>Aralık ve başlangıç değerleri</h2>
+                    <div class="alanlar">
+                        <div class="alan">
+                            <label for="x0">x₀ (başlangıç)</label>
+                            <input type="number" id="x0" name="x0" value="{{ x0 }}" step="any" required>
+                        </div>
+                        <div class="alan">
+                            <label for="xmax">xmax (bitiş)</label>
+                            <input type="number" id="xmax" name="xmax" value="{{ xmax }}" step="any" required>
+                        </div>
+                        <div class="alan">
+                            <label for="y0">y(x₀)</label>
+                            <input type="number" id="y0" name="y0" value="{{ baslangiclar[0] }}" step="any" required>
+                        </div>
+                        <div class="alan" id="alan-yp0" {% if derece < 2 %}hidden{% endif %}>
+                            <label for="yp0">y'(x₀)</label>
+                            <input type="number" id="yp0" name="yp0" value="{{ baslangiclar[1] }}" step="any" required>
+                        </div>
+                        <div class="alan" id="alan-ypp0" {% if derece < 3 %}hidden{% endif %}>
+                            <label for="ypp0">y''(x₀)</label>
+                            <input type="number" id="ypp0" name="ypp0" value="{{ baslangiclar[2] }}" step="any" required>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="grup">
+                    <h2>Yöntem</h2>
+                    <div class="alanlar">
+                        <div class="alan">
+                            <label for="yontem">Sayısal yöntem</label>
+                            <select id="yontem" name="yontem">
+                                {% for kod, ad in yontem_adlari %}
+                                    <option value="{{ kod }}" {% if kod == secili_yontem %}selected{% endif %}>{{ ad }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="alan">
+                            <label for="n">Adım sayısı (n)</label>
+                            <input type="number" id="n" name="n" value="{{ n }}" min="1" step="1" required>
+                        </div>
+                    </div>
+                    <p class="ipucu" id="adim-boyu">Adım boyu h = (xmax − x₀) / n</p>
+                </section>
+
+                <div class="butonlar">
+                    <button type="submit" id="coz-butonu">Çöz</button>
+                    <button type="submit" formaction="/indir" class="ikincil">CSV indir</button>
+                </div>
+            </form>
+
+            {% if mesaj %}
+                {% if hata %}
+                    <div class="kart sonuc hata" role="alert">
+                        <strong>Çözülemedi:</strong> {{ mesaj }}
+                    </div>
+                {% else %}
+                    <div class="kart sonuc">
+                        <div class="ozet">{{ mesaj }}</div>
+                        <div class="degerler">
+                            {% for ad, deger in son_degerler %}
+                                <div class="deger"><span>{{ ad }} =</span> {{ deger }}</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+            {% endif %}
+
+            {% if gif %}
+                <figure class="kart grafik">
+                    <img src="data:image/gif;base64,{{ gif }}" alt="Çözümün adım adım çizilen animasyonu">
+                    <div class="indirmeler">
+                        <a href="data:image/gif;base64,{{ gif }}" download="cozum.gif">GIF indir</a>
+                        <a href="data:image/png;base64,{{ grafik }}" download="cozum.png">PNG indir</a>
+                    </div>
+                </figure>
+            {% endif %}
+        </div>
+
+        <aside class="sag">
+            <div class="kart tablo-kart">
+                <h2>Çözüm tablosu</h2>
+                {% if satirlar %}
+                    <div class="tablo-kaydir">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Adım</th>
+                                    {% for sutun in sutunlar %}
+                                        <th>{{ sutun }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for hucreler in satirlar %}
+                                    <tr>
+                                        {% for hucre in hucreler %}
+                                            <td>{{ hucre }}</td>
+                                        {% endfor %}
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="not">{{ n }} adımın {{ satirlar|length }} tanesi gösteriliyor. Tamamı için <b>CSV indir</b>.</p>
+                {% else %}
+                    <p class="bos">Henüz çözüm yok. Denklemi gir ya da hazır bir örnek seç, sonra <b>Çöz</b>'e bas.</p>
+                {% endif %}
+            </div>
+        </aside>
+    </div>
+</div>
+
+<script>
+    // Sayfanın tarayıcıda çalışan kısmı: sunucuya gitmeden yapılan küçük işler
+    (function () {
+        const form = document.getElementById("cozum-formu");
+        const solTaraf = document.getElementById("sol-taraf");
+        const alanYp0 = document.getElementById("alan-yp0");
+        const alanYpp0 = document.getElementById("alan-ypp0");
+        const adimBoyu = document.getElementById("adim-boyu");
+        const ornek = document.getElementById("ornek");
+        const cozButonu = document.getElementById("coz-butonu");
+
+        function seciliDerece() {
+            return Number(form.querySelector('input[name="derece"]:checked').value);
+        }
+
+        // Derece değişince: denklemin sol tarafı ve başlangıç kutuları
+        function dereceyiUygula() {
+            const d = seciliDerece();
+            solTaraf.textContent = "y" + "'".repeat(d) + " =";
+            alanYp0.hidden = d < 2;
+            alanYpp0.hidden = d < 3;
+
+            // Gizli kutu boş kalırsa tarayıcı formu göndermez
+            for (const alan of [alanYp0, alanYpp0]) {
+                const kutu = alan.querySelector("input");
+                if (alan.hidden && kutu.value === "") {
+                    kutu.value = "0";
+                }
+            }
+        }
+
+        // x₀, xmax veya n değişince adım boyunu göster
+        function adimBoyunuGoster() {
+            const x0 = parseFloat(form.x0.value);
+            const xmax = parseFloat(form.xmax.value);
+            const n = parseInt(form.n.value, 10);
+            const h = (xmax - x0) / n;
+
+            if (Number.isFinite(h) && n >= 1 && h > 0) {
+                adimBoyu.textContent = "Adım boyu h = (xmax − x₀) / n = " + Number(h.toPrecision(6));
+            } else {
+                adimBoyu.textContent = "Adım boyu h = (xmax − x₀) / n";
+            }
+        }
+
+        // Hazır örnek seçilince kutuları doldur
+        function ornegiYukle() {
+            const veri = ornek.selectedOptions[0].dataset;
+            if (!veri.ifade) {
+                return;
+            }
+
+            form.querySelector('input[name="derece"][value="' + veri.derece + '"]').checked = true;
+            form.ifade.value = veri.ifade;
+            form.x0.value = veri.x0;
+            form.xmax.value = veri.xmax;
+            form.y0.value = veri.y0;
+            form.yp0.value = veri.yp0 || "0";
+            form.ypp0.value = veri.ypp0 || "0";
+            if (veri.yontem) {
+                form.yontem.value = veri.yontem;
+            }
+            if (veri.n) {
+                form.n.value = veri.n;
+            }
+
+            dereceyiUygula();
+            adimBoyunuGoster();
+            form.ifade.focus();
+        }
+
+        // Çöz'e basınca GIF birkaç saniye sürdüğü için bekleme göster
+        form.addEventListener("submit", function (olay) {
+            if (olay.submitter === cozButonu) {
+                cozButonu.disabled = true;
+                cozButonu.textContent = "Hesaplanıyor…";
+            }
+        });
+
+        // Tarayıcının geri tuşuyla dönülünce butonu eski haline getir
+        window.addEventListener("pageshow", function () {
+            cozButonu.disabled = false;
+            cozButonu.textContent = "Çöz";
+        });
+
+        for (const radyo of form.querySelectorAll('input[name="derece"]')) {
+            radyo.addEventListener("change", dereceyiUygula);
+        }
+        for (const ad of ["x0", "xmax", "n"]) {
+            form[ad].addEventListener("input", adimBoyunuGoster);
+        }
+        ornek.addEventListener("change", ornegiYukle);
+
+        dereceyiUygula();
+        adimBoyunuGoster();
+    })();
+</script>
+</body>
+</html>
